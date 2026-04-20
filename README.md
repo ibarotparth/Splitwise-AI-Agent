@@ -15,6 +15,7 @@ The Splitwise AI Agent is an innovative project that combines agentic AI with th
 ### MVP Scope
 
 The Minimum Viable Product focuses on core expense operations:
+
 - Expense creation with automatic parsing of amount, description, participants, and dates
 - Basic expense retrieval and balance queries
 - Secure authentication and API key management
@@ -23,6 +24,7 @@ The Minimum Viable Product focuses on core expense operations:
 ## Architecture
 
 The project follows a modular architecture with:
+
 - **Backend API**: FastAPI-based REST API for business logic
 - **AI Agent**: LangChain-powered agent for natural language processing
 - **Frontend**: Streamlit-based chat interface
@@ -31,6 +33,7 @@ The project follows a modular architecture with:
 ## Tech Stack
 
 ### Core Technologies
+
 - **Python 3.10+**: Primary programming language
 - **LangChain**: Agent framework for LLM integration
 - **OpenAI API**: LLM provider (with $5 free credit for new users)
@@ -38,12 +41,14 @@ The project follows a modular architecture with:
 - **Streamlit**: Frontend chat interface
 
 ### Supporting Libraries
+
 - **Pydantic**: Data validation and serialization
 - **Requests/httpx**: HTTP client libraries
 - **cryptography**: Security and encryption
 - **python-dotenv**: Environment variable management
 
 ### Development Tools
+
 - **VS Code**: Primary IDE
 - **Git**: Version control
 - **Virtualenv**: Python environment management
@@ -59,29 +64,34 @@ The project follows a modular architecture with:
 ## Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/yourusername/splitwise-ai-agent.git
    cd splitwise-ai-agent
    ```
 
 2. **Create virtual environment**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. **Install dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
 
 4. **Set up environment variables**
+
    ```bash
    cp .env.example .env
    # Edit .env with your API keys
    ```
 
 5. **Run the application**
+
    ```bash
    # Backend API
    uvicorn app.main:app --reload
@@ -129,17 +139,20 @@ splitwise-ai-agent/
 ## Development Roadmap
 
 ### Phase 1: MVP (Current)
+
 - Basic expense creation and retrieval
 - Simple chat interface
 - Secure API key proxy
 
 ### Phase 2: Enhanced Features
+
 - Advanced expense analytics
 - Group management
 - Multi-currency support
 - Voice input capabilities
 
 ### Phase 3: Production
+
 - Scalable deployment
 - Advanced security features
 - Mobile app interface
@@ -170,4 +183,4 @@ For questions or support, please open an issue on GitHub or contact the maintain
 
 ---
 
-*This project demonstrates advanced AI agent capabilities in a practical expense management application.*
+_This project demonstrates advanced AI agent capabilities in a practical expense management application._
