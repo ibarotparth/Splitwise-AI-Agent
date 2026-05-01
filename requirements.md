@@ -1,123 +1,131 @@
-# Project Requirements: Splitwise AI Agent
+# Requirements: Splitwise AI Agent
 
-## Overview
+## Project Overview
 
-This project implements an AI-powered agent that securely interacts with the Splitwise API through a natural language chatbot interface. The Minimum Viable Product (MVP) focuses on demonstrating agentic AI capabilities by allowing users to add and manage expenses via conversational commands, while ensuring API key security through a proxy mechanism.
+A conversational expense management app that wraps the Splitwise API in a LangGraph-powered AI agent. Users interact via natural language — the agent parses intent, calls the appropriate Splitwise tools, handles validation/retries, and replies in plain English.
 
-## MVP Scope
+---
 
-The MVP will include the following core features:
+## Functional Requirements
 
-### 1. Conversational Expense Management
+### Phase 1 — MVP Stabilization (Weeks 1–3)
 
-- **Natural Language Input**: Users can describe expenses in plain English (e.g., "Add $45 for lunch with Mike and Sarah at Italian restaurant")
-- **Expense Creation**: Automatically parse amount, description, participants, and date from user input
-- **Basic Expense Retrieval**: Allow users to query recent expenses or balances
+#### Expense Operations
 
-### 2. Agentic AI Implementation
+- Create an expense from a natural language command (e.g. "Add $45 for lunch with Mike and Sarah")
+  - Parse: amount, description, participants, optional date
+  - Confirm parsed values before submitting (human-in-the-loop stub)
+- Retrieve recent expenses for the authenticated user
+- Query current balances with one or more friends
 
-- **Intent Recognition**: Use LLM to understand user requests and extract relevant expense data
-- **API Integration**: Seamlessly call Splitwise API endpoints for expense operations
-- **Error Handling**: Provide helpful feedback when requests fail or data is incomplete
+#### AI Agent (LangGraph)
 
-### 3. Secure API Key Management
+- Replace previous LangChain agent with a LangGraph `StateGraph`
+- Define nodes: `intent_classifier → tool_selector → tool_executor → response_formatter`
+- Support multi-turn conversation with follow-up question handling
+- Graceful error node: catches API failures and bad parses, retries once, then surfaces a readable message
 
-- **Proxy Architecture**: All Splitwise API calls go through a secure proxy
-- **Key Storage**: Encrypted storage of user API keys
-- **Access Control**: Ensure only authorized requests reach the Splitwise API
+#### Authentication & Security
 
-## Detailed Requirements
+- Splitwise authentication via OAuth 1.0 (HMAC-SHA1)
+  - OAuth credentials (`CONSUMER_KEY`, `CONSUMER_SECRET`, `ACCESS_TOKEN`, `ACCESS_TOKEN_SECRET`) loaded from `.env`
+  - All requests to Splitwise API signed using `requests-oauthlib` with HMAC-SHA1
+  - OAuth endpoints: Request Token — `https://secure.splitwise.com/oauth/request_token`, Access Token — `https://secure.splitwise.com/oauth/access_token`
+- Proxy all Splitwise calls through FastAPI backend — frontend never touches the Splitwise API directly
+- OAuth credentials never logged, never stored in the database
 
-### Functional Requirements
+#### Chat Interface
 
-#### User Interface
+- Streamlit-based chat UI with message history
+- Loading indicator while agent is processing
+- Error messages surfaced inline (not stack traces)
 
-- **Chat Interface**: Simple web-based chat UI for user interaction
-- **Message History**: Display conversation history with the AI agent
-- **Expense Confirmation**: Show parsed expense details before submission for user approval
+---
 
-#### AI Agent Capabilities
+### Phase 2 — Agentic Features (Weeks 4–7)
 
-- **Expense Parsing**: Extract from natural language:
-  - Amount (currency and value)
-  - Description
-  - Participants (by name or Splitwise user ID)
-  - Date (default to current date if not specified)
-  - Split method (equal, exact amounts, percentages)
-- **Context Awareness**: Remember user preferences and common participants
-- **Multi-turn Conversations**: Handle follow-up questions and clarifications
+#### Memory
 
-#### Splitwise API Integration
+- Persist conversation state across turns using LangGraph's checkpointer (SQLite backend initially)
+- Agent remembers previously mentioned people and groups within a session
 
-- **Authentication**: Secure OAuth or API key-based authentication
-- **Expense Operations**:
-  - Create new expenses
-  - Retrieve user expenses
-  - Get group information
-  - Handle currency conversion
-- **Error Handling**: Graceful handling of API errors, rate limits, and invalid data
+#### Multi-Agent Graph
 
-#### Security Requirements
+- Expense agent: creation, retrieval, balance queries
+- Analytics agent: summarize spending by category, by person, over a date range
+- Agents are separate graph nodes; a router node dispatches based on intent
 
-- **API Key Protection**: Never expose user API keys in client-side code
-- **HTTPS Only**: All communications must be encrypted
-- **Input Validation**: Sanitize all user inputs to prevent injection attacks
-- **Rate Limiting**: Implement reasonable limits to prevent API abuse
+#### Human-in-the-Loop
 
-### Non-Functional Requirements
+- Before submitting any write operation (expense creation, settlement), pause the graph and ask for user confirmation
+- User can correct details in natural language before re-running the node
 
-#### Performance
+#### Group Management
 
-- **Response Time**: AI responses within 3-5 seconds
-- **Concurrent Users**: Support at least 10 simultaneous users for MVP
-- **API Latency**: Splitwise API calls should complete within reasonable time limits
+- List groups the user belongs to
+- Add or remove members from a group
+- Assign expenses to a specific group
 
-#### Reliability
+#### Validation & Retry
 
-- **Error Recovery**: Automatic retry for transient failures
-- **Data Consistency**: Ensure expense data integrity
-- **Logging**: Comprehensive logging for debugging and monitoring
+- Structured output validation on LLM tool calls (Pydantic models)
+- Auto-retry once on schema mismatch before raising to error node
 
-#### Usability
+---
 
-- **Intuitive Interface**: Clean, simple chat interface
-- **Help Commands**: Built-in help and example commands
-- **Feedback**: Clear success/error messages
+### Phase 3 — Production & Scale (Weeks 8–12)
 
-#### Scalability
+#### Infrastructure
 
-- **Modular Architecture**: Easy to add new features
-- **Database Flexibility**: Support for different storage backends
-- **API Extensibility**: Framework for adding more Splitwise features
+- Dockerized services: FastAPI backend + Streamlit frontend as separate containers
+- Deploy to Render or Railway (free tier sufficient for MVP scale)
+- Swap SQLite → PostgreSQL for persistence
 
-## User Stories
+#### Extended Features
 
-1. **Expense Addition**
-   - As a user, I want to say "Add $20 for coffee with Alice" so that a new expense is created in Splitwise
-   - As a user, I want the bot to ask for clarification if information is missing
+- Multi-currency support (display in user's preferred currency, convert via exchange rate API)
+- LLM provider: OpenAI only (model switchable via env var, e.g. gpt-4o-mini → gpt-4o)
+- Reminder agent: scheduled nudges for unsettled balances (via cron or APScheduler)
 
-2. **Expense Query**
-   - As a user, I want to ask "What are my recent expenses?" to see my latest transactions
-   - As a user, I want to check "What's my balance with John?" to see outstanding amounts
+#### Security Hardening
 
-3. **Security**
-   - As a user, I want my Splitwise API key to be stored securely so that it's not compromised
-   - As a user, I want all API calls to go through a secure proxy
+- Rate limiting on FastAPI routes (slowapi)
+- Input sanitisation before passing to LLM
+- API key rotation support
 
-## Acceptance Criteria
+#### Observability
 
-- [ ] Users can successfully add expenses via natural language chat
-- [ ] AI agent correctly parses expense details from various input formats
-- [ ] API keys are stored encrypted and never exposed to client
-- [ ] Basic error handling for invalid inputs and API failures
-- [ ] Simple web interface for chat interaction
-- [ ] Integration with Splitwise API for expense creation and retrieval
+- Log token usage per request (OpenAI)
+- Cost tracking dashboard (simple Streamlit page)
+- Basic health-check endpoint for deployment monitoring
 
-## Future Enhancements (Post-MVP)
+---
 
-- Advanced expense analytics
-- Group management features
-- Multi-currency support
-- Integration with other expense tracking apps
-- Voice input capabilities
-- Mobile app interface
+## Non-Functional Requirements
+
+| Concern          | Requirement                                                      |
+| ---------------- | ---------------------------------------------------------------- |
+| Response latency | Agent response < 5s for simple queries on GPT-4o-mini            |
+| Security         | No API keys in logs, git, or client-side JS                      |
+| Reliability      | Retry logic on transient Splitwise / OpenAI errors               |
+| Maintainability  | Each LangGraph node is a pure function, independently testable   |
+| Portability      | Runs locally with `docker compose up`; no vendor lock-in for LLM |
+
+---
+
+## Out of Scope (for now)
+
+- Voice input
+- Native mobile app
+- Integration with non-Splitwise platforms (Venmo, PayPal)
+- Real-time push notifications
+
+---
+
+## API Dependencies
+
+| API                         | Purpose                       | Auth                   | Cost                                          |
+| --------------------------- | ----------------------------- | ---------------------- | --------------------------------------------- |
+| Splitwise REST API          | Expense CRUD, balance queries | API key (free for dev) | Free                                          |
+| OpenAI API                  | LLM inference                 | API key                | Pay-per-use (~$0.15/1M tokens on gpt-4o-mini) |
+| Exchange Rate API (Phase 3) | Currency conversion           | API key (free tier)    | Free                                          |
