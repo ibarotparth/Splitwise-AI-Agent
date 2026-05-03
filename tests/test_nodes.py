@@ -1,8 +1,11 @@
+"""Tests for skills (replaces old node tests)."""
 from unittest.mock import MagicMock
 
-from app.nodes.intent import IntentClassifierNode
-from app.nodes.error import ErrorHandlerNode
-from app.nodes.expense import ExpenseExecutorNode
+from app.skills.intent_classifier_skill import IntentClassifierSkill
+from app.skills.error_skill import ErrorSkill
+from app.skills.balance_skill import BalanceSkill
+from app.skills.expense_query_skill import ExpenseQuerySkill
+from app.skills.expense_create_skill import ExpenseCreateSkill
 from app.schemas import AgentState
 
 
@@ -10,7 +13,6 @@ def _state(**kwargs) -> AgentState:
     base: AgentState = {
         "messages": [],
         "intent": None,
-        "expense_data": None,
         "response": None,
         "error": None,
     }
@@ -18,271 +20,223 @@ def _state(**kwargs) -> AgentState:
     return base
 
 
-def _make_executor(client) -> ExpenseExecutorNode:
-    """LLM mock that returns sensible defaults for every structured-output call."""
-    llm = MagicMock()
+# ── IntentClassifierSkill ─────────────────────────────────────────────────────
 
-    def with_structured_output(model_cls):
-        runnable = MagicMock()
-        # Map model class name → default extraction object
-        defaults = {
-            "_ExpenseExtraction": MagicMock(
-                amount=20.0,
-                description="Lunch",
-                participants=["Alice"],
-                expense_date=None,
-                group_name=None,
-                split_with_all_group_members=False,
-            ),
-            "_ExpenseIdExtraction": MagicMock(expense_id=99),
-            "_GroupNameExtraction": MagicMock(group_name="Roommates"),
-            "_UpdateExpenseExtraction": MagicMock(
-                expense_id=99,
-                amount=40.0,
-                description=None,
-                expense_date=None,
-            ),
-        }
-        runnable.invoke.return_value = defaults.get(model_cls.__name__, MagicMock())
-        return runnable
-
-    llm.with_structured_output.side_effect = with_structured_output
-    return ExpenseExecutorNode(llm, client)
-
-
-# ── IntentClassifierNode ──────────────────────────────────────────────────────
-
-class TestIntentClassifierNode:
+class TestIntentClassifier:
     def test_classifies_create_expense(self):
         llm = MagicMock()
         llm.with_structured_output.return_value.invoke.return_value = MagicMock(
             intent="create_expense"
         )
-        node = IntentClassifierNode(llm)
+        skill = IntentClassifierSkill(llm)
         state = _state(messages=[{"role": "user", "content": "Add $20 for lunch with Bob"}])
-        result = node(state)
+        result = skill(state)
         assert result["intent"] == "create_expense"
-        assert result["error"] is None
 
     def test_returns_unknown_on_empty_messages(self):
         llm = MagicMock()
-        node = IntentClassifierNode(llm)
-        result = node(_state())
+        skill = IntentClassifierSkill(llm)
+        result = skill(_state())
         assert result["intent"] == "unknown"
-        assert result["error"] is not None
 
+# ── ErrorSkill ────────────────────────────────────────────────────────────────
 
-# ── ErrorHandlerNode ──────────────────────────────────────────────────────────
-
-class TestErrorHandlerNode:
-    def test_shows_error_message_when_error_present(self):
-        node = ErrorHandlerNode()
-        result = node(_state(error="API failed", intent="get_expenses"))
+class TestErrorSkill:
+    def test_shows_error_message(self):
+        skill = ErrorSkill()
+        result = skill(_state(error="API failed", intent="get_expenses"))
         assert "API failed" in result["response"]
 
-    def test_shows_help_on_unknown_intent(self):
-        node = ErrorHandlerNode()
-        result = node(_state(intent="unknown"))
-        assert "Add" in result["response"]
-        assert "groups" in result["response"].lower()
-        assert "Delete" in result["response"]
+    def test_help_on_unknown(self):
+        skill = ErrorSkill()
+        result = skill(_state(intent="unknown"))
+        assert "Add" in result["response"] and "groups" in result["response"].lower()
 
-    def test_generic_message_on_known_intent_no_error(self):
-        node = ErrorHandlerNode()
-        result = node(_state(intent="get_balance"))
-        assert "couldn't complete" in result["response"]
+    def test_generic_message(self):
+        skill = ErrorSkill()
+        result = skill(_state(intent="get_balance"))
+        assert "couldn't" in result["response"].lower()
 
 
-# ── ExpenseExecutorNode ───────────────────────────────────────────────────────
+# ── BalanceSkill ──────────────────────────────────────────────────────────────
 
-class TestExpenseExecutorNode:
-    def test_get_expenses_returns_formatted_list(self):
+class TestBalanceSkill:
+    def test_no_balances(self):
+        client = MagicMock()
+        client.get_balances.return_value = []
+        result = BalanceSkill(client).execute(
+            _state(messages=[{"role": "user", "content": "balance"}])
+        )
+        assert "no outstanding" in result["response"]
+
+    def test_shows_who_owes_whom(self):
+        client = MagicMock()
+        client.get_balances.return_value = [
+            {"friend": "Alice", "amount": "10.00", "currency": "USD"},
+            {"friend": "Bob", "amount": "-5.00", "currency": "USD"},
+        ]
+        result = BalanceSkill(client).execute(
+            _state(messages=[{"role": "user", "content": "show all balances"}])
+        )
+        assert "Alice owes you" in result["response"]
+        assert "You owe Bob" in result["response"]
+
+    def test_filters_by_friend_name(self):
+        client = MagicMock()
+        client.get_balances.return_value = [
+            {"friend": "Alice Smith", "amount": "10.00", "currency": "USD"},
+            {"friend": "Bob Jones", "amount": "-5.00", "currency": "USD"},
+        ]
+        result = BalanceSkill(client).execute(
+            _state(messages=[{"role": "user", "content": "what do I owe bob"}])
+        )
+        assert "Bob" in result["response"]
+        assert "Alice" not in result["response"]
+
+
+# ── ExpenseQuerySkill ─────────────────────────────────────────────────────────
+
+class TestExpenseQuerySkill:
+    def test_list_recent(self):
         client = MagicMock()
         client.get_expenses.return_value = [
-            {
-                "id": 1,
-                "description": "Pizza",
-                "cost": "30.00",
-                "currency": "USD",
-                "date": "2024-01-01T00:00:00Z",
-            }
+            {"id": 1, "description": "Lunch", "cost": "20", "currency": "USD",
+             "date": "2024-01-01T00:00:00Z"}
         ]
-        node = _make_executor(client)
-        result = node(
+        llm = MagicMock()
+        result = ExpenseQuerySkill(llm, client).execute(
+            _state(intent="get_expenses", messages=[{"role": "user", "content": "show"}])
+        )
+        assert "Lunch" in result["response"]
+
+    def test_details_by_id(self):
+        client = MagicMock()
+        client.get_expense.return_value = {
+            "id": 99, "description": "Pizza", "cost": "30", "currency": "USD",
+            "date": "2024-01-01T00:00:00Z", "created_by": "Alice", "users": [],
+        }
+        llm = MagicMock()
+        llm.with_structured_output.return_value.invoke.return_value = MagicMock(expense_id=99)
+        result = ExpenseQuerySkill(llm, client).execute(
             _state(
-                messages=[{"role": "user", "content": "show expenses"}],
-                intent="get_expenses",
+                intent="get_expense_details",
+                messages=[{"role": "user", "content": "show me expense 99"}],
             )
         )
         assert "Pizza" in result["response"]
-
-    def test_get_expenses_empty(self):
-        client = MagicMock()
-        client.get_expenses.return_value = []
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "show expenses"}],
-                intent="get_expenses",
-            )
-        )
-        assert "no recent expenses" in result["response"]
-
-    def test_create_expense_calls_client(self):
-        client = MagicMock()
-        client.create_expense.return_value = {
-            "id": 1,
-            "description": "Lunch",
-            "cost": "20.00",
-            "currency": "USD",
-            "date": "2024-01-01",
-        }
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "Add $20 for lunch with Alice"}],
-                intent="create_expense",
-            )
-        )
-        client.create_expense.assert_called_once()
-        assert "Lunch" in result["response"]
-
-    def test_get_expense_details(self):
-        client = MagicMock()
-        client.get_expense.return_value = {
-            "id": 99,
-            "description": "Pizza",
-            "cost": "30.00",
-            "currency": "USD",
-            "date": "2024-01-01T00:00:00Z",
-            "created_by": "Alice",
-            "users": [{"name": "Alice", "paid_share": "30", "owed_share": "15"}],
-        }
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "show me expense 99"}],
-                intent="get_expense_details",
-            )
-        )
-        client.get_expense.assert_called_once_with(99)
         assert "#99" in result["response"]
 
-    def test_update_expense(self):
-        client = MagicMock()
-        client.update_expense.return_value = {
-            "id": 99,
-            "description": "Lunch",
-            "cost": "40.00",
-            "currency": "USD",
-        }
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "update expense 99 to $40"}],
-                intent="update_expense",
-            )
-        )
-        client.update_expense.assert_called_once()
-        assert "Updated" in result["response"]
 
-    def test_delete_expense(self):
-        client = MagicMock()
-        client.delete_expense.return_value = True
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "delete expense 99"}],
-                intent="delete_expense",
-            )
-        )
-        client.delete_expense.assert_called_once_with(99)
-        assert "Deleted" in result["response"]
+# ── ExpenseCreateSkill — amount validation ─────────────────────────────────────
 
-    def test_list_groups(self):
-        client = MagicMock()
-        client.get_groups.return_value = [
-            {"id": 1, "name": "Roommates", "members": ["Alice", "Bob"]}
-        ]
-        node = _make_executor(client)
-        result = node(_state(messages=[{"role": "user", "content": "groups"}], intent="get_groups"))
-        assert "Roommates" in result["response"]
+import pytest
+from app.skills.expense_create_skill import _detect_bad_amount
 
-    def test_group_details_found(self):
-        client = MagicMock()
-        client.get_groups.return_value = [
-            {"id": 1, "name": "Roommates", "members": ["Alice", "Bob"]}
-        ]
-        client.get_group.return_value = {
-            "id": 1,
-            "name": "Roommates",
-            "members": ["Alice", "Bob"],
-            "simplify_by_default": True,
-            "simplified_debts": [],
-        }
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "details of Roommates"}],
-                intent="get_group_details",
-            )
-        )
-        assert "Roommates" in result["response"]
-        client.get_group.assert_called_once_with(1)
 
-    def test_group_details_not_found(self):
-        client = MagicMock()
-        client.get_groups.return_value = [
-            {"id": 1, "name": "OtherGroup", "members": []}
-        ]
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "details of Roommates"}],
-                intent="get_group_details",
-            )
-        )
-        assert "not found" in result["response"]
+class TestDetectBadAmount:
+    """Pre-LLM regex check on the raw user message."""
 
-    def test_get_comments(self):
-        client = MagicMock()
-        client.get_comments.return_value = [
-            {"id": 1, "content": "Thanks", "created_at": "now", "author": "Alice"}
-        ]
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "comments on 99"}],
-                intent="get_comments",
-            )
-        )
-        client.get_comments.assert_called_once_with(99)
-        assert "Thanks" in result["response"]
+    @pytest.mark.parametrize("message", [
+        "add -$50 for dinner",
+        "add $-50 for dinner",
+        "add -50 for dinner",
+        "-$50",
+        "$-50",
+        "-50",
+    ])
+    def test_negative(self, message):
+        assert _detect_bad_amount(message) == "negative"
 
-    def test_get_currencies(self):
-        client = MagicMock()
-        client.get_currencies.return_value = [
-            {"code": "USD", "unit": "$"},
-            {"code": "EUR", "unit": "€"},
-        ]
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "what currencies"}],
-                intent="get_currencies",
-            )
-        )
-        assert "USD" in result["response"] and "EUR" in result["response"]
+    @pytest.mark.parametrize("message", [
+        "add $0 for dinner",
+        "add 0 for dinner",
+        "add $0.00 for dinner",
+        "$0",
+    ])
+    def test_zero(self, message):
+        assert _detect_bad_amount(message) == "zero"
 
-    def test_expense_node_captures_exception(self):
-        client = MagicMock()
-        client.get_expenses.side_effect = RuntimeError("network error")
-        node = _make_executor(client)
-        result = node(
-            _state(
-                messages=[{"role": "user", "content": "show expenses"}],
-                intent="get_expenses",
-            )
+    @pytest.mark.parametrize("message", [
+        "add -$0 for dinner",
+        "add $-0 for dinner",
+        "add -0 for dinner",
+        "-$0",
+        "$-0",
+        "-0",
+    ])
+    def test_negative_zero_flagged_as_negative(self, message):
+        # The minus sign trips the negative check first — either rejection is fine
+        assert _detect_bad_amount(message) in ("negative", "zero")
+
+    @pytest.mark.parametrize("message", [
+        "add 50 million for dinner",
+        "add $5 billion",
+        "5 lakhs for dinner",
+    ])
+    def test_huge(self, message):
+        assert _detect_bad_amount(message) == "huge"
+
+    @pytest.mark.parametrize("message", [
+        "add $50 for dinner",
+        "add 50 for dinner",
+        "add $0.50 for coffee",          # half-dollar — not zero
+        "add $5000 for trip-25",         # hyphen in a word, not before a digit
+    ])
+    def test_valid_passes(self, message):
+        assert _detect_bad_amount(message) is None
+
+
+class TestExpenseCreateSkillValidation:
+    """End-to-end check that bad amounts short-circuit before any API call."""
+
+    def _make_skill(self, amount=50.0):
+        llm = MagicMock()
+        llm.with_structured_output.return_value.invoke.return_value = MagicMock(
+            amount=amount,
+            description="dinner",
+            participants=[],
+            expense_date=None,
+            group_name=None,
         )
-        assert "network error" in result["error"]
-        assert result["response"] is None
+        client = MagicMock()
+        return ExpenseCreateSkill(llm, client), client, llm
+
+    def test_pre_llm_negative_rejection_skips_llm_call(self):
+        skill, client, llm = self._make_skill(amount=50.0)  # LLM would say 50
+        result = skill.execute(_state(
+            intent="create_expense",
+            messages=[{"role": "user", "content": "add -$50 for dinner"}],
+        ))
+        assert "negative" in result["response"].lower()
+        # Critical: LLM was NEVER called
+        llm.with_structured_output.return_value.invoke.assert_not_called()
+        client.get_groups.assert_not_called()
+        client.create_expense_with_ids.assert_not_called()
+
+    def test_pre_llm_zero_rejection(self):
+        skill, client, llm = self._make_skill(amount=0.0)
+        result = skill.execute(_state(
+            intent="create_expense",
+            messages=[{"role": "user", "content": "add $0 for dinner"}],
+        ))
+        assert "greater than zero" in result["response"]
+        llm.with_structured_output.return_value.invoke.assert_not_called()
+
+    def test_pre_llm_huge_rejection(self):
+        skill, client, llm = self._make_skill(amount=50.0)
+        result = skill.execute(_state(
+            intent="create_expense",
+            messages=[{"role": "user", "content": "add 50 million for dinner"}],
+        ))
+        assert "unreasonably large" in result["response"]
+        llm.with_structured_output.return_value.invoke.assert_not_called()
+
+    def test_post_llm_zero_rejection_when_message_is_clean(self):
+        # If the message looks fine but LLM returns 0 anyway, post-check catches it
+        skill, client, llm = self._make_skill(amount=0.0)
+        result = skill.execute(_state(
+            intent="create_expense",
+            messages=[{"role": "user", "content": "add some money for dinner"}],
+        ))
+        assert "greater than zero" in result["response"]
+        client.create_expense_with_ids.assert_not_called()

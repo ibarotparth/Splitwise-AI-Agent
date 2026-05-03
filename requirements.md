@@ -1,131 +1,130 @@
 # Requirements: Splitwise AI Agent
 
-## Project Overview
+## Overview
 
-A conversational expense management app that wraps the Splitwise API in a LangGraph-powered AI agent. Users interact via natural language — the agent parses intent, calls the appropriate Splitwise tools, handles validation/retries, and replies in plain English.
-
----
-
-## Functional Requirements
-
-### Phase 1 — MVP Stabilization (Weeks 1–3)
-
-#### Expense Operations
-
-- Create an expense from a natural language command (e.g. "Add $45 for lunch with Mike and Sarah")
-  - Parse: amount, description, participants, optional date
-  - Confirm parsed values before submitting (human-in-the-loop stub)
-- Retrieve recent expenses for the authenticated user
-- Query current balances with one or more friends
-
-#### AI Agent (LangGraph)
-
-- Replace previous LangChain agent with a LangGraph `StateGraph`
-- Define nodes: `intent_classifier → tool_selector → tool_executor → response_formatter`
-- Support multi-turn conversation with follow-up question handling
-- Graceful error node: catches API failures and bad parses, retries once, then surfaces a readable message
-
-#### Authentication & Security
-
-- Splitwise authentication via OAuth 1.0 (HMAC-SHA1)
-  - OAuth credentials (`CONSUMER_KEY`, `CONSUMER_SECRET`, `ACCESS_TOKEN`, `ACCESS_TOKEN_SECRET`) loaded from `.env`
-  - All requests to Splitwise API signed using `requests-oauthlib` with HMAC-SHA1
-  - OAuth endpoints: Request Token — `https://secure.splitwise.com/oauth/request_token`, Access Token — `https://secure.splitwise.com/oauth/access_token`
-- Proxy all Splitwise calls through FastAPI backend — frontend never touches the Splitwise API directly
-- OAuth credentials never logged, never stored in the database
-
-#### Chat Interface
-
-- Streamlit-based chat UI with message history
-- Loading indicator while agent is processing
-- Error messages surfaced inline (not stack traces)
+A skill-based conversational agent over the Splitwise API. Users interact in natural language; the agent classifies intent, dispatches to a dedicated skill, and either returns a response or asks for clarification via interactive widgets when something is ambiguous.
 
 ---
 
-### Phase 2 — Agentic Features (Weeks 4–7)
+## Functional requirements
 
-#### Memory
+### F1. Expenses
 
-- Persist conversation state across turns using LangGraph's checkpointer (SQLite backend initially)
-- Agent remembers previously mentioned people and groups within a session
+| ID | Requirement |
+|---|---|
+| F1.1 | **Create** an expense from natural language (amount, description, participants, optional date, optional group). |
+| F1.2 | When the user mentions a group, **auto-resolve** the group ID via fuzzy matching (exact → substring → alphanumerics-only). |
+| F1.3 | When a group is matched and no specific people are named, default to **splitting among all group members**. |
+| F1.4 | Support **four split types**: equal, exact amounts, percentages, shares. The user picks via a radio widget; configures via per-person number inputs (except equal, which is auto-computed). |
+| F1.5 | When the user names participants, **resolve them with confidence scoring**, preferring group members over generic friends. If any name is ambiguous or missing, ask the user via a multi-select widget. |
+| F1.6 | If the user provides no description / title, use **`Expense — {Mon D, YYYY}`** as a default. |
+| F1.7 | Always show a **confirmation widget** before posting any expense to Splitwise. |
+| F1.8 | **List** the user's recent expenses (default: last 10). |
+| F1.9 | View **details** of one expense by ID, including who paid and who owes what. |
+| F1.10 | **Update** an existing expense (any subset of: amount, description, date). |
+| F1.11 | **Delete** an expense by ID. |
+| F1.12 | **Undo** the most recently AI-created expense in the current session via the literal command `undo` (no LLM round-trip). |
 
-#### Multi-Agent Graph
+### F2. Balances
 
-- Expense agent: creation, retrieval, balance queries
-- Analytics agent: summarize spending by category, by person, over a date range
-- Agents are separate graph nodes; a router node dispatches based on intent
+| ID | Requirement |
+|---|---|
+| F2.1 | Show all outstanding balances (filters out zero balances). |
+| F2.2 | When the user mentions a friend by name, **filter** to that friend only (case-insensitive substring match). |
+| F2.3 | Format positive amounts as "X owes you Y" and negative as "You owe X Y". |
 
-#### Human-in-the-Loop
+### F3. Groups
 
-- Before submitting any write operation (expense creation, settlement), pause the graph and ask for user confirmation
-- User can correct details in natural language before re-running the node
+| ID | Requirement |
+|---|---|
+| F3.1 | List all groups with member names and counts. |
+| F3.2 | Show details of a specific group: members, simplify-debts setting, count of outstanding debts. |
+| F3.3 | Group name resolution must be tolerant of punctuation, case, and partial matches. |
+| F3.4 | Distinguish "show details of [name with numbers]" (group lookup) from "show details of expense [number]" (expense lookup) — the intent classifier must not confuse a bare number with an expense ID. |
 
-#### Group Management
+### F4. Comments & currencies
 
-- List groups the user belongs to
-- Add or remove members from a group
-- Assign expenses to a specific group
+| ID | Requirement |
+|---|---|
+| F4.1 | Show comments on a specific expense by ID. |
+| F4.2 | List supported Splitwise currencies (top 25 + total count). |
 
-#### Validation & Retry
+### F5. Conversational behavior
 
-- Structured output validation on LLM tool calls (Pydantic models)
-- Auto-retry once on schema mismatch before raising to error node
+| ID | Requirement |
+|---|---|
+| F5.1 | The agent must **never silently guess** when participant or group resolution is ambiguous. |
+| F5.2 | All write operations must show a confirmation summary before submitting to Splitwise. |
+| F5.3 | The user can **type a free-text message at any time** to break out of a multi-turn flow. |
+| F5.4 | The agent must respond to `undo` (and variants) without invoking the LLM. |
 
----
+### F6. Error handling
 
-### Phase 3 — Production & Scale (Weeks 8–12)
-
-#### Infrastructure
-
-- Dockerized services: FastAPI backend + Streamlit frontend as separate containers
-- Deploy to Render or Railway (free tier sufficient for MVP scale)
-- Swap SQLite → PostgreSQL for persistence
-
-#### Extended Features
-
-- Multi-currency support (display in user's preferred currency, convert via exchange rate API)
-- LLM provider: OpenAI only (model switchable via env var, e.g. gpt-4o-mini → gpt-4o)
-- Reminder agent: scheduled nudges for unsettled balances (via cron or APScheduler)
-
-#### Security Hardening
-
-- Rate limiting on FastAPI routes (slowapi)
-- Input sanitisation before passing to LLM
-- API key rotation support
-
-#### Observability
-
-- Log token usage per request (OpenAI)
-- Cost tracking dashboard (simple Streamlit page)
-- Basic health-check endpoint for deployment monitoring
-
----
-
-## Non-Functional Requirements
-
-| Concern          | Requirement                                                      |
-| ---------------- | ---------------------------------------------------------------- |
-| Response latency | Agent response < 5s for simple queries on GPT-4o-mini            |
-| Security         | No API keys in logs, git, or client-side JS                      |
-| Reliability      | Retry logic on transient Splitwise / OpenAI errors               |
-| Maintainability  | Each LangGraph node is a pure function, independently testable   |
-| Portability      | Runs locally with `docker compose up`; no vendor lock-in for LLM |
+| ID | Requirement |
+|---|---|
+| F6.1 | API failures must surface a clean message (not a stack trace). |
+| F6.2 | When intent is `unknown`, show a help message listing all supported actions with examples. |
+| F6.3 | If the LLM returns junk participant tokens (e.g. "all", "everyone", "members"), filter them out and treat as "all group members". |
 
 ---
 
-## Out of Scope (for now)
+## Non-functional requirements
+
+| Concern | Requirement |
+|---|---|
+| Latency | Read queries < 3 s; create flow each step < 4 s on `gpt-4o`. |
+| Cost | Reads use `gpt-4o-mini` (~$0.15 / 1M input tokens). Writes use `gpt-4o`. Both configurable. |
+| Security | Splitwise OAuth 1.0 credentials in `.env` only — never logged or persisted. UI never talks to Splitwise directly. |
+| Reliability | Skills wrap their own exceptions; failure in one skill does not corrupt graph state. |
+| Maintainability | Each skill has one responsibility; depends on `SplitwiseClientInterface` (ABC), not the concrete client. New intents add ~1 file + 1 routing entry. |
+| Testability | Unit tests inject mocks for both the client and the LLM. Target: ≥35 tests, no live API in CI. |
+| Statelessness | The backend is stateless; multi-turn `pending` state is round-tripped via the API contract. |
+
+---
+
+## API contracts
+
+### `POST /chat`
+
+**Request (`ChatRequest`):**
+
+| Field | Type | Notes |
+|---|---|---|
+| `message` | `str?` | Free-text user input. Optional when `selection` / `numeric_inputs` is provided. |
+| `history` | `list[AgentMessage]` | Prior chat turns. |
+| `selection` | `list[str]?` | Option IDs picked from a widget. |
+| `numeric_inputs` | `dict[str, float]?` | For the `split_details` widget. |
+| `pending` | `PendingAction?` | State from previous turn (echoed by client). |
+
+**Response (`ChatResponse`):**
+
+| Field | Type | Notes |
+|---|---|---|
+| `reply` | `str` | Markdown-rendered text for the chat. |
+| `awaiting_input` | `AwaitingInput?` | If present, UI must render a widget. |
+| `pending` | `PendingAction?` | If present, UI must echo it back next turn. |
+
+### `GET /health`
+
+Returns `{"status": "ok"}`.
+
+---
+
+## Out of scope (current)
 
 - Voice input
-- Native mobile app
-- Integration with non-Splitwise platforms (Venmo, PayPal)
+- Native mobile apps
+- Multi-user authentication (single-user only)
 - Real-time push notifications
+- Settlement / debt-simplification write operations
+- Friend management (add/remove)
+- Expense attachments (receipts, photos)
 
 ---
 
-## API Dependencies
+## API dependencies
 
-| API                         | Purpose                       | Auth                   | Cost                                          |
-| --------------------------- | ----------------------------- | ---------------------- | --------------------------------------------- |
-| Splitwise REST API          | Expense CRUD, balance queries | API key (free for dev) | Free                                          |
-| OpenAI API                  | LLM inference                 | API key                | Pay-per-use (~$0.15/1M tokens on gpt-4o-mini) |
-| Exchange Rate API (Phase 3) | Currency conversion           | API key (free tier)    | Free                                          |
+| API | Purpose | Auth | Cost |
+|---|---|---|---|
+| Splitwise REST v3 | Expense CRUD, balances, groups, currencies, comments | OAuth 1.0 HMAC-SHA1 | Free |
+| OpenAI API | Intent classification + structured extraction | API key | ~$0.15–$3 / 1M tokens depending on model |

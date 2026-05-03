@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import date as DateType
-from typing import Optional
+from typing import Literal, Optional
 
 from requests_oauthlib import OAuth1Session
 
@@ -9,12 +9,16 @@ from app.security import Settings
 
 BASE_URL = "https://secure.splitwise.com/api/v3.0"
 
+SplitType = Literal["equal", "exact", "percentage", "shares"]
+
 
 # ── Interface (Dependency Inversion) ─────────────────────────────────────────
 
 class SplitwiseClientInterface(ABC):
     @abstractmethod
-    def get_expenses(self, limit: int = 20) -> list[dict]: ...
+    def get_expenses(
+        self, limit: int = 20, group_id: Optional[int] = None
+    ) -> list[dict]: ...
 
     @abstractmethod
     def get_expense(self, expense_id: int) -> dict: ...
@@ -29,6 +33,21 @@ class SplitwiseClientInterface(ABC):
         group_name: Optional[str] = None,
         split_with_all_group_members: bool = False,
     ) -> dict: ...
+
+    @abstractmethod
+    def create_expense_with_ids(
+        self,
+        amount: float,
+        description: str,
+        payer_id: int,
+        owed_shares: dict[int, float],
+        expense_date: Optional[DateType] = None,
+        group_id: Optional[int] = None,
+    ) -> dict:
+        """
+        Low-level expense creation. Caller provides exact owed_share per user_id.
+        Used by the multi-turn create flow once split values are confirmed.
+        """
 
     @abstractmethod
     def update_expense(
@@ -57,6 +76,15 @@ class SplitwiseClientInterface(ABC):
     @abstractmethod
     def get_currencies(self) -> list[dict]: ...
 
+    @abstractmethod
+    def get_current_user(self) -> dict: ...
+
+    @abstractmethod
+    def get_friends(self) -> list[dict]: ...
+
+    @abstractmethod
+    def get_group_members(self, group_id: int) -> list[dict]: ...
+
 
 # ── Concrete implementation ───────────────────────────────────────────────────
 
@@ -83,8 +111,13 @@ class SplitwiseClient(SplitwiseClientInterface):
 
     # ── Expenses ─────────────────────────────────────────────────────────────
 
-    def get_expenses(self, limit: int = 20) -> list[dict]:
-        data = self._get("/get_expenses", limit=limit)
+    def get_expenses(
+        self, limit: int = 20, group_id: Optional[int] = None
+    ) -> list[dict]:
+        params: dict = {"limit": limit}
+        if group_id is not None:
+            params["group_id"] = group_id
+        data = self._get("/get_expenses", **params)
         return [self._format_expense(e) for e in data.get("expenses", [])]
 
     def get_expense(self, expense_id: int) -> dict:
@@ -144,6 +177,48 @@ class SplitwiseClient(SplitwiseClientInterface):
                 f"{amount:.2f}" if uid == current_user_id else "0.00"
             )
             payload[f"users__{i}__owed_share"] = shares[i]
+
+        created = self._post("/create_expense", payload)
+        expense = created.get("expenses", [{}])[0]
+        return self._format_expense(expense)
+
+    def create_expense_with_ids(
+        self,
+        amount: float,
+        description: str,
+        payer_id: int,
+        owed_shares: dict[int, float],
+        expense_date: Optional[DateType] = None,
+        group_id: Optional[int] = None,
+    ) -> dict:
+        if expense_date is None:
+            expense_date = DateType.today()
+
+        # Validate split adds up to amount (within rounding tolerance)
+        total = sum(owed_shares.values())
+        if abs(total - amount) > 0.02:
+            raise ValueError(
+                f"Split totals {total:.2f} but expense amount is {amount:.2f}"
+            )
+
+        payload: dict = {
+            "cost": f"{amount:.2f}",
+            "description": description,
+            "date": expense_date.isoformat(),
+            "split_equally": False,
+        }
+        if group_id is not None:
+            payload["group_id"] = group_id
+
+        if payer_id not in owed_shares:
+            owed_shares = {payer_id: 0.0, **owed_shares}
+
+        for i, (uid, owed) in enumerate(owed_shares.items()):
+            payload[f"users__{i}__user_id"] = uid
+            payload[f"users__{i}__paid_share"] = (
+                f"{amount:.2f}" if uid == payer_id else "0.00"
+            )
+            payload[f"users__{i}__owed_share"] = f"{owed:.2f}"
 
         created = self._post("/create_expense", payload)
         expense = created.get("expenses", [{}])[0]
@@ -248,6 +323,31 @@ class SplitwiseClient(SplitwiseClientInterface):
         return [
             {"code": c.get("currency_code"), "unit": c.get("unit")}
             for c in data.get("currencies", [])
+        ]
+
+    # ── Public helpers (for skills) ──────────────────────────────────────────
+
+    def get_current_user(self) -> dict:
+        user = self._get("/get_current_user").get("user", {})
+        return {
+            "id": user.get("id"),
+            "first_name": user.get("first_name", ""),
+            "last_name": user.get("last_name", ""),
+        }
+
+    def get_friends(self) -> list[dict]:
+        return self._get("/get_friends").get("friends", [])
+
+    def get_group_members(self, group_id: int) -> list[dict]:
+        group = self._get(f"/get_group/{group_id}").get("group", {})
+        return [
+            {
+                "id": m["id"],
+                "first_name": m.get("first_name", ""),
+                "last_name": m.get("last_name", ""),
+            }
+            for m in group.get("members", [])
+            if m.get("id") is not None
         ]
 
     # ── Internal helpers ─────────────────────────────────────────────────────

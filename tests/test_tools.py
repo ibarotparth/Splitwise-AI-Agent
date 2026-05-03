@@ -14,7 +14,8 @@ def settings():
         splitwise_access_token="token",
         splitwise_access_token_secret="token_secret",
         openai_api_key="sk-test",
-        openai_model="gpt-4o-mini",
+        classifier_model="gpt-4o-mini",
+        extractor_model="gpt-4o",
     )
 
 

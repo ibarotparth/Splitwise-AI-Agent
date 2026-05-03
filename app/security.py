@@ -10,7 +10,9 @@ class Settings:
     splitwise_access_token: str
     splitwise_access_token_secret: str
     openai_api_key: str
-    openai_model: str
+    # Model strategy: cheap model for reads/classification, smarter for writes/extraction
+    classifier_model: str           # e.g. "gpt-4o-mini"
+    extractor_model: str            # e.g. "gpt-4o"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -32,5 +34,6 @@ class Settings:
             splitwise_access_token=os.environ["SPLITWISE_ACCESS_TOKEN"],
             splitwise_access_token_secret=os.environ["SPLITWISE_ACCESS_TOKEN_SECRET"],
             openai_api_key=os.environ["OPENAI_API_KEY"],
-            openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            classifier_model=os.getenv("OPENAI_CLASSIFIER_MODEL", "gpt-4o-mini"),
+            extractor_model=os.getenv("OPENAI_EXTRACTOR_MODEL", "gpt-4o"),
         )
