@@ -16,19 +16,19 @@ Bot: ✅ Added NIB 4/29 for $156.27 in 548 Maple Ave (id #12345)
 
 ## ✨ What it does
 
-| Capability | Example |
-|---|---|
-| Smart expense add | *"add $30 dinner with Alice"* — agent asks for group / split type via widgets if ambiguous |
-| Group expense | *"add $156 in Roommates with all members"* — auto-resolves group + member IDs |
-| List recent | *"show recent expenses"* |
-| View one | *"show details of expense 12345"* |
-| Update | *"change expense 12345 amount to $30"* |
-| Delete | *"delete expense 12345"* |
-| **Undo** | *"undo"* — removes the last AI-created expense in the session |
-| Balances | *"what do I owe John?"* (or *"show all balances"*) |
-| Groups | *"show all my groups"* / *"show details of 548 Maple Ave"* |
-| Comments | *"show comments on expense 12345"* |
-| Currencies | *"what currencies are supported?"* |
+| Capability        | Example                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------ |
+| Smart expense add | _"add $30 dinner with Alice"_ — agent asks for group / split type via widgets if ambiguous |
+| Group expense     | _"add $156 in Roommates with all members"_ — auto-resolves group + member IDs              |
+| List recent       | _"show recent expenses"_                                                                   |
+| View one          | _"show details of expense 12345"_                                                          |
+| Update            | _"change expense 12345 amount to $30"_                                                     |
+| Delete            | _"delete expense 12345"_                                                                   |
+| **Undo**          | _"undo"_ — removes the last AI-created expense in the session                              |
+| Balances          | _"what do I owe John?"_ (or _"show all balances"_)                                         |
+| Groups            | _"show all my groups"_ / _"show details of 548 Maple Ave"_                                 |
+| Comments          | _"show comments on expense 12345"_                                                         |
+| Currencies        | _"what currencies are supported?"_                                                         |
 
 ### How it stays accurate
 
@@ -59,8 +59,6 @@ response  +  optional `awaiting_input` widget spec
 ```
 
 Reads use the cheap classifier model. Only writes/extractions use the smarter extractor model. Configurable via env.
-
-See **[skills.md](skills.md)** for the full reproduction spec.
 
 ---
 
@@ -150,11 +148,6 @@ splitwise-ai-agent/
 │   ├── test_matchers.py              # 13 tests
 │   ├── test_nodes.py                 # 11 tests (skills)
 │   └── test_tools.py                 # 15 tests (Splitwise client)
-├── requirements.txt
-├── requirements-dev.txt
-├── requirements.md                   # Functional requirements
-├── tech-stack.md                     # Tech decisions + rationale
-└── skills.md                         # Reproduction spec for AI agents
 ```
 
 ---
@@ -173,19 +166,19 @@ pytest tests/ -v
 
 11 endpoints across reads + writes:
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /get_current_user` | "Paid by" user ID |
-| `GET /get_friends` | Name resolution + balances |
-| `GET /get_groups` | List + name resolution |
-| `GET /get_group/{id}` | Members + simplified debts |
-| `GET /get_expenses` | Recent expenses |
-| `GET /get_expense/{id}` | Single expense |
-| `GET /get_comments` | Comments on an expense |
-| `GET /get_currencies` | Currency list |
-| `POST /create_expense` | Create (with optional `group_id`) |
-| `POST /update_expense/{id}` | Edit |
-| `POST /delete_expense/{id}` | Delete (used by undo) |
+| Endpoint                    | Purpose                           |
+| --------------------------- | --------------------------------- |
+| `GET /get_current_user`     | "Paid by" user ID                 |
+| `GET /get_friends`          | Name resolution + balances        |
+| `GET /get_groups`           | List + name resolution            |
+| `GET /get_group/{id}`       | Members + simplified debts        |
+| `GET /get_expenses`         | Recent expenses                   |
+| `GET /get_expense/{id}`     | Single expense                    |
+| `GET /get_comments`         | Comments on an expense            |
+| `GET /get_currencies`       | Currency list                     |
+| `POST /create_expense`      | Create (with optional `group_id`) |
+| `POST /update_expense/{id}` | Edit                              |
+| `POST /delete_expense/{id}` | Delete (used by undo)             |
 
 Auth: OAuth 1.0 HMAC-SHA1 via `requests-oauthlib`.
 
@@ -210,17 +203,3 @@ The Streamlit UI:
 - `.env` is gitignored — never commit Splitwise/OpenAI keys
 - All Splitwise calls are proxied through the FastAPI backend; the UI has no direct API access
 - The agent will not perform destructive operations without showing a confirmation widget first
-
----
-
-## 📚 Further reading
-
-- **[skills.md](skills.md)** — full reproduction spec (an AI agent could rebuild this from scratch using only that file)
-- **[requirements.md](requirements.md)** — functional requirements
-- **[tech-stack.md](tech-stack.md)** — tech decisions + rationale
-
----
-
-## 📄 License
-
-MIT — see [LICENSE](LICENSE).
